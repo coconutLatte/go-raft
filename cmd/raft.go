@@ -1,7 +1,12 @@
 package main
 
-import "fmt"
+import (
+	"github.com/coconutLatte/go-raft/pkg/log"
+	"github.com/coconutLatte/go-raft/pkg/node"
+)
 
 func main() {
-	fmt.Println("test")
+	log.InitSimpleLog()
+	raftNode := node.NewRaftNode()
+	raftNode.Start()
 }
