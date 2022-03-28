@@ -3,8 +3,8 @@ package node
 import (
 	"context"
 	"github.com/coconutLatte/go-raft/pkg/log"
-	"github.com/gin-gonic/gin"
-	"net/http"
+	"github.com/coconutLatte/go-raft/pkg/server"
+	"sync"
 )
 
 type Role string
@@ -18,48 +18,26 @@ const (
 type RaftNode struct {
 	role string
 
-	server *http.Server
-
-	ctx context.Context
+	ctx    context.Context
+	server *server.Server
 }
 
-func NewRaftNode() *RaftNode {
-	engine := gin.Default()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	engine.GET("/ping", func(ctx *gin.Context) {
-		ctx.String(200, "pong")
-		cancel()
-	})
-
-	server := &http.Server{
-		Handler: engine,
-		Addr:    ":8080",
+func NewRaftNode(ctx context.Context, wg *sync.WaitGroup) (*RaftNode, error) {
+	log.Info("new raft node")
+	raftNode := &RaftNode{
+		ctx: ctx,
 	}
 
-	return &RaftNode{
-		server: server,
-		ctx:    ctx,
+	srv, err := server.NewServer(ctx, wg)
+	if err != nil {
+		log.Errorf("new http server failed, %v", err)
+		return nil, err
 	}
+	raftNode.server = srv
+
+	return raftNode, nil
 }
 
 func (n *RaftNode) Start() {
-	go func() {
-		if err := n.server.ListenAndServe(); err != nil {
-			log.Warnf("start server failed, %v", err)
-		}
-	}()
-
-	<-n.ctx.Done()
-	n.stop()
-}
-
-func (n *RaftNode) stop() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := n.server.Shutdown(ctx); err != nil {
-		log.Warnf("shut down server failed, %v", err)
-	}
+	n.server.Start()
 }
