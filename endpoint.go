@@ -1,6 +1,7 @@
-package server
+package go_raft
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
@@ -62,4 +63,24 @@ type Endpoint struct {
 	name         string
 	relativePath string
 	handlers     map[string]gin.HandlerFunc
+}
+
+func NewEndpoint(opts ...Option) Endpoint {
+	ept := Endpoint{
+		handlers: make(map[string]gin.HandlerFunc),
+	}
+	for _, opt := range opts {
+		opt.apply(&ept)
+	}
+
+	return ept
+}
+
+func Register(endpoint Endpoint) error {
+	if _, exist := endpoints[endpoint.name]; exist {
+		return fmt.Errorf("endpoint [%s] already exist", endpoint.name)
+	}
+
+	endpoints[endpoint.name] = endpoint
+	return nil
 }

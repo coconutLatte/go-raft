@@ -1,8 +1,7 @@
-package server
+package go_raft
 
 import (
 	"context"
-	"github.com/coconutLatte/go-raft/pkg/log"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"sync"
@@ -35,28 +34,28 @@ func (s *Server) Start() {
 	s.wg.Add(1)
 	go func() {
 		if err := s.base.ListenAndServe(); err != http.ErrServerClosed {
-			log.Warn("start server failed, %v", err)
+			Warn("start server failed, %v", err)
 		}
 	}()
 
-	log.Info("starting...")
+	Info("starting...")
 	<-s.ctx.Done()
 	s.stop()
 }
 
 func (s *Server) stop() {
-	log.Debug("shutting down server...")
+	Debug("shutting down server...")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if err := s.base.Shutdown(ctx); err != nil {
-		log.Warnf("shut down server failed, %v", err)
+		Warnf("shut down server failed, %v", err)
 	}
-	log.Debug("shut down server success!")
+	Debug("shut down server success!")
 	s.wg.Done()
 }
 
-var endpoints map[string]Endpoint
+var endpoints = map[string]Endpoint{}
 
 func registerEndpoints(engine *gin.Engine) {
 	for _, endpoint := range endpoints {
