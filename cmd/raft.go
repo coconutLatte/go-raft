@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/coconutLatte/go-raft"
+	"fmt"
+	raft "github.com/coconutLatte/go-raft"
+	"github.com/coconutLatte/go-raft/log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -11,15 +13,25 @@ import (
 )
 
 func main() {
+	args := os.Args
+	if len(args) < 4 {
+		fmt.Println("not enough address, at least 3")
+		os.Exit(1)
+	}
+
+	run(args[1:])
+}
+
+func run(addresses []string) {
 	rand.Seed(time.Now().Unix())
-	go_raft.InitSimpleLog()
+	log.InitSimpleLog()
 
 	wg := &sync.WaitGroup{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	raftNode, err := go_raft.NewRaftNode(ctx, wg)
+	raftNode, err := raft.NewRaftNode(ctx, wg, addresses)
 	if err != nil {
-		go_raft.Errorf("new raft node failed, %v", err)
+		log.Errorf("new raft node failed, %v", err)
 		os.Exit(1)
 	}
 	go raftNode.Start()
@@ -28,7 +40,7 @@ func main() {
 	go func() {
 		c := make(chan os.Signal)
 		signal.Notify(c, os.Interrupt)
-		go_raft.Info("listen os interrupt signal")
+		log.Info("listen os interrupt signal")
 		<-c
 		cancel()
 		wg.Done()

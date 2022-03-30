@@ -1,4 +1,4 @@
-package go_raft
+package log
 
 import (
 	"fmt"
@@ -21,7 +21,7 @@ func Info(args ...interface{}) {
 }
 
 func Infof(template string, args ...interface{}) {
-	log.Infof(template, args)
+	log.Infof(template, args...)
 }
 
 func Debug(args ...interface{}) {
@@ -29,7 +29,7 @@ func Debug(args ...interface{}) {
 }
 
 func Debugf(template string, args ...interface{}) {
-	log.Debugf(template, args)
+	log.Debugf(template, args...)
 }
 
 func Warn(args ...interface{}) {
@@ -37,7 +37,7 @@ func Warn(args ...interface{}) {
 }
 
 func Warnf(template string, args ...interface{}) {
-	log.Warnf(template, args)
+	log.Warnf(template, args...)
 }
 
 func Error(args ...interface{}) {
@@ -45,5 +45,5 @@ func Error(args ...interface{}) {
 }
 
 func Errorf(template string, args ...interface{}) {
-	log.Errorf(template, args)
+	log.Errorf(template, args...)
 }
