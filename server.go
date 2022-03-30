@@ -2,6 +2,7 @@ package go_raft
 
 import (
 	"context"
+	"github.com/coconutLatte/go-raft/log"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"sync"
@@ -13,14 +14,18 @@ type Server struct {
 	wg   *sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, wg *sync.WaitGroup) (*Server, error) {
+func NewServer(ctx context.Context, wg *sync.WaitGroup, raftNode *RaftNode) (*Server, error) {
 	engine := gin.Default()
+
+	engine.Use(func(c *gin.Context) {
+		c.Set("raft_node", raftNode)
+	})
 
 	registerEndpoints(engine)
 
 	server := &http.Server{
 		Handler: engine,
-		Addr:    ":8080",
+		Addr:    raftNode.address,
 	}
 
 	return &Server{
@@ -31,27 +36,28 @@ func NewServer(ctx context.Context, wg *sync.WaitGroup) (*Server, error) {
 }
 
 func (s *Server) Start() {
+	log.Infof("server listening on %s", s.base.Addr)
 	s.wg.Add(1)
 	go func() {
 		if err := s.base.ListenAndServe(); err != http.ErrServerClosed {
-			Warn("start server failed, %v", err)
+			log.Warnf("start server failed, %v", err)
 		}
 	}()
 
-	Info("starting...")
+	log.Info("starting...")
 	<-s.ctx.Done()
 	s.stop()
 }
 
 func (s *Server) stop() {
-	Debug("shutting down server...")
+	log.Debug("shutting down server...")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if err := s.base.Shutdown(ctx); err != nil {
-		Warnf("shut down server failed, %v", err)
+		log.Warnf("shut down server failed, %v", err)
 	}
-	Debug("shut down server success!")
+	log.Debug("shut down server success!")
 	s.wg.Done()
 }
 
