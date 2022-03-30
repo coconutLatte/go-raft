@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
-	"github.com/coconutLatte/go-raft/pkg/log"
-	"github.com/coconutLatte/go-raft/pkg/node"
+	"github.com/coconutLatte/go-raft"
+	"math/rand"
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 )
 
 func main() {
-	log.InitSimpleLog()
+	rand.Seed(time.Now().Unix())
+	go_raft.InitSimpleLog()
+
 	wg := &sync.WaitGroup{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	raftNode, err := node.NewRaftNode(ctx, wg)
+	raftNode, err := go_raft.NewRaftNode(ctx, wg)
 	if err != nil {
-		log.Errorf("new raft node failed, %v", err)
+		go_raft.Errorf("new raft node failed, %v", err)
 		os.Exit(1)
 	}
 	go raftNode.Start()
@@ -25,7 +28,7 @@ func main() {
 	go func() {
 		c := make(chan os.Signal)
 		signal.Notify(c, os.Interrupt)
-		log.Info("listen os interrupt signal")
+		go_raft.Info("listen os interrupt signal")
 		<-c
 		cancel()
 		wg.Done()

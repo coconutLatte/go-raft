@@ -1,4 +1,4 @@
-package log
+package go_raft
 
 import (
 	"fmt"
