@@ -2,6 +2,8 @@ package go_raft
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/coconutLatte/go-raft/log"
 	"github.com/go-resty/resty/v2"
 	"go.uber.org/atomic"
@@ -52,6 +54,8 @@ type RaftNode struct {
 	notify *Notify
 
 	wg *sync.WaitGroup
+
+	cst *time.Location
 }
 
 func NewRaftNode(ctx context.Context, wg *sync.WaitGroup, addresses []string) (*RaftNode, error) {
@@ -59,17 +63,20 @@ func NewRaftNode(ctx context.Context, wg *sync.WaitGroup, addresses []string) (*
 	raftNode := &RaftNode{
 		role:      Follower,
 		roleMu:    &sync.Mutex{},
+		resetCh:   make(chan interface{}),
 		ctx:       ctx,
 		wg:        wg,
 		clients:   make([]*resty.Client, 0),
 		notify:    NewNotify(),
 		address:   addresses[0],
 		addresses: addresses,
+		voted:     &atomic.Bool{},
+		cst:       time.FixedZone("CST", 8*3600),
 	}
 	raftNode.initNotify()
 
 	for _, addr := range raftNode.otherNodes() {
-		raftNode.clients = append(raftNode.clients, resty.New().SetBaseURL(addr))
+		raftNode.clients = append(raftNode.clients, resty.New().SetBaseURL("http://"+addr))
 	}
 
 	srv, err := NewServer(ctx, wg, raftNode)
@@ -92,25 +99,19 @@ func (n *RaftNode) Start() {
 func (n *RaftNode) selfExam() {
 	n.wg.Add(1)
 	tc := time.NewTicker(randomTCTime())
+Loop:
 	for {
 		select {
 		case <-tc.C:
-			log.Debug(n.role.toString())
-			//log.Debug("new self exam round...")
-			// TODO check self status to determine what to do
-
-			tc.Reset(randomTCTime())
+			n.doCheck(tc)
 		case <-n.resetCh:
-			//log.Debug("clear timeout")
-			// TODO clear time out
-
+			log.Debug("clear timeout")
 			tc.Reset(randomTCTime())
 		case <-n.ctx.Done():
-			//log.Debug("break self exam success!")
-			n.wg.Done()
-			break
+			break Loop
 		}
 	}
+	n.wg.Done()
 }
 
 func (n *RaftNode) doCheck(tc *time.Ticker) {
@@ -119,21 +120,22 @@ func (n *RaftNode) doCheck(tc *time.Ticker) {
 	if n.role == Follower {
 		log.Info("promote to candidate")
 		n.role = Candidate
-		// TODO requestVote to other raft nodes
 		n.requestVoteFromOtherNodes()
 	}
 
 	if n.role == Leader {
-		// TODO do heartbeat
-		log.Info("I'm leader, going to do heartbeat round")
-
+		log.Info("I'm leader, going to heartbeat round")
+		n.heartbeatRound()
 		tc.Reset(1 * time.Second)
+	} else {
+		tc.Reset(randomTCTime())
 	}
 }
 
 func (n *RaftNode) requestVoteFromOtherNodes() {
 	// self voted
 	votes := 1
+	n.voted.Store(true)
 	for _, client := range n.clients {
 		resp, err := client.R().Post("/vote")
 		if err != nil {
@@ -141,7 +143,6 @@ func (n *RaftNode) requestVoteFromOtherNodes() {
 			continue
 		}
 
-		log.Infof("resp %#v", resp)
 		if resp.IsSuccess() {
 			votes++
 		}
@@ -149,7 +150,45 @@ func (n *RaftNode) requestVoteFromOtherNodes() {
 
 	if votes > len(n.addresses)/2 {
 		n.role = Leader
+	} else {
+		n.role = Follower
+		n.voted.Store(false)
 	}
+}
+
+func (n *RaftNode) heartbeatRound() {
+	var hbs []Heartbeat
+	for _, client := range n.clients {
+		resp, err := client.R().Get("/heartbeat")
+		if err != nil {
+			log.Errorf("get /heartbeat failed, %v", err)
+			continue
+		}
+
+		hb := &Heartbeat{}
+		if err = json.Unmarshal(resp.Body(), hb); err != nil {
+			log.Errorf("convert resp body to Heartbeat failed, %v", err)
+			continue
+		}
+		hbs = append(hbs, *hb)
+	}
+
+	log.Info(n.formatHBs(hbs))
+	log.Info("heartbeat round complete")
+}
+
+func (n *RaftNode) formatHBs(hbs []Heartbeat) string {
+
+	hbsStr := ""
+	for i, hb := range hbs {
+		hbsStr += "Address: " + hb.Address + ", "
+		hbsStr += "Time: " + hb.Time.In(n.cst).Format(time.RFC3339)
+		if i != len(hbs)-1 {
+			hbsStr += "; "
+		}
+	}
+
+	return fmt.Sprintf("{%s}", hbsStr)
 }
 
 func (n *RaftNode) otherNodes() []string {
@@ -170,9 +209,9 @@ func (n *RaftNode) otherNodes() []string {
 	return nil
 }
 
-const baseTime = 1 * time.Second
+const baseTime = 5 * time.Second
 
-// 2.0s ~ 2.1s
+// 5.0s ~ 5.1s
 func randomTCTime() time.Duration {
 	return baseTime + time.Duration(rand.Intn(100))*time.Millisecond
 }

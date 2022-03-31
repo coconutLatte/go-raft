@@ -4,27 +4,37 @@ import (
 	"github.com/coconutLatte/go-raft/log"
 	"github.com/gin-gonic/gin"
 	"net/http"
+	"time"
 )
 
 func init() {
 	ept := NewEndpoint(
-		WithEndpointName("vote"),
-		WithEndpointPath("/vote"),
-		WithEndpointPost(requestVote))
-	err := Register(ept)
-	if err != nil {
-		panic("register endpoint vote failed")
-	}
-
-	ept = NewEndpoint(
 		WithEndpointName("hello"),
 		WithEndpointPath("/hello"),
 		WithEndpointGet(func(context *gin.Context) {
 			context.String(http.StatusOK, "hello\n")
 		}))
-	err = Register(ept)
+	err := Register(ept)
 	if err != nil {
 		panic("register endpoint hello failed")
+	}
+
+	ept = NewEndpoint(
+		WithEndpointName("vote"),
+		WithEndpointPath("/vote"),
+		WithEndpointPost(requestVote))
+	err = Register(ept)
+	if err != nil {
+		panic("register endpoint vote failed")
+	}
+
+	ept = NewEndpoint(
+		WithEndpointName("heartbeat"),
+		WithEndpointPath("/heartbeat"),
+		WithEndpointGet(heartbeat))
+	err = Register(ept)
+	if err != nil {
+		panic("register endpoint heartbeat failed")
 	}
 }
 
@@ -51,4 +61,22 @@ func GetRaftNode(ginCtx *gin.Context) *RaftNode {
 	}
 
 	return raftNodeVal.(*RaftNode)
+}
+
+type Heartbeat struct {
+	Address string    `json:"address"`
+	Time    time.Time `json:"time"`
+}
+
+func heartbeat(ginCtx *gin.Context) {
+	log.Info("receive heartbeat")
+
+	raftNode := GetRaftNode(ginCtx)
+
+	raftNode.resetCh <- 1
+
+	ginCtx.JSON(http.StatusOK, &Heartbeat{
+		Address: raftNode.address,
+		Time:    time.Now(),
+	})
 }

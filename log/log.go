@@ -17,7 +17,7 @@ func InitSimpleLog() {
 }
 
 func Info(args ...interface{}) {
-	log.Info(args)
+	log.Info(args...)
 }
 
 func Infof(template string, args ...interface{}) {
@@ -25,7 +25,7 @@ func Infof(template string, args ...interface{}) {
 }
 
 func Debug(args ...interface{}) {
-	log.Debug(args)
+	log.Debug(args...)
 }
 
 func Debugf(template string, args ...interface{}) {
@@ -33,7 +33,7 @@ func Debugf(template string, args ...interface{}) {
 }
 
 func Warn(args ...interface{}) {
-	log.Warn(args)
+	log.Warn(args...)
 }
 
 func Warnf(template string, args ...interface{}) {
@@ -41,7 +41,7 @@ func Warnf(template string, args ...interface{}) {
 }
 
 func Error(args ...interface{}) {
-	log.Error(args)
+	log.Error(args...)
 }
 
 func Errorf(template string, args ...interface{}) {
