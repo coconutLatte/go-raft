@@ -8,28 +8,35 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"time"
 )
 
 func main() {
 	args := os.Args
-	if len(args) < 4 {
+	if len(args) < 5 {
 		fmt.Println("not enough address, at least 3")
 		os.Exit(1)
 	}
 
-	run(args[1:])
+	dbNum, err := strconv.Atoi(args[1])
+	if err != nil {
+		fmt.Printf("convert %s to int failed, %v", args[1], err)
+		os.Exit(1)
+	}
+
+	run(dbNum, args[1+dbNum], args[2:])
 }
 
-func run(addresses []string) {
+func run(dbNum int, address string, addresses []string) {
 	rand.Seed(time.Now().Unix())
 	log.InitSimpleLog()
 
 	wg := &sync.WaitGroup{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	raftNode, err := raft.NewRaftNode(ctx, wg, addresses)
+	raftNode, err := raft.NewRaftNode(ctx, wg, address, addresses, dbNum)
 	if err != nil {
 		log.Errorf("new raft node failed, %v", err)
 		os.Exit(1)

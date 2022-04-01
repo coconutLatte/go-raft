@@ -50,6 +50,7 @@ type RaftNode struct {
 	server    *Server
 	clients   []*resty.Client
 	addresses []string
+	db        *DB
 
 	notify *Notify
 
@@ -58,22 +59,50 @@ type RaftNode struct {
 	cst *time.Location
 }
 
-func NewRaftNode(ctx context.Context, wg *sync.WaitGroup, addresses []string) (*RaftNode, error) {
+func NewRaftNode(ctx context.Context, wg *sync.WaitGroup, address string, addresses []string, dbNum int) (*RaftNode, error) {
 	log.Info("new raft node")
 	raftNode := &RaftNode{
-		role:      Follower,
 		roleMu:    &sync.Mutex{},
 		resetCh:   make(chan interface{}),
 		ctx:       ctx,
 		wg:        wg,
 		clients:   make([]*resty.Client, 0),
 		notify:    NewNotify(),
-		address:   addresses[0],
+		address:   address,
 		addresses: addresses,
 		voted:     &atomic.Bool{},
 		cst:       time.FixedZone("CST", 8*3600),
 	}
 	raftNode.initNotify()
+
+	db, err := OpenDB(dbNum)
+	if err != nil {
+		log.Errorf("open db failed, %v", err)
+		return nil, err
+	}
+	raftNode.db = db
+
+	nodeInfos := db.GetNodeInfos()
+	if len(nodeInfos) == 0 {
+		// should init table
+		for _, address := range addresses {
+			nodeInfos = append(nodeInfos, NodeInfo{Address: address, Role: Follower})
+		}
+
+		if err = db.CreateNodeInfos(nodeInfos); err != nil {
+			log.Errorf("create node infos %v failed, %v", nodeInfos, err)
+			return nil, err
+		}
+
+		raftNode.role = Follower
+	} else {
+		for _, nodeInfo := range nodeInfos {
+			if nodeInfo.Address == raftNode.address {
+				raftNode.role = nodeInfo.Role
+			}
+		}
+	}
+	log.Debugf("node %s init as role %s", raftNode.address, raftNode.role.toString())
 
 	for _, addr := range raftNode.otherNodes() {
 		raftNode.clients = append(raftNode.clients, resty.New().SetBaseURL("http://"+addr))
@@ -106,6 +135,7 @@ Loop:
 			n.doCheck(tc)
 		case <-n.resetCh:
 			log.Debug("clear timeout")
+			log.Debugf("[%s]", n.role.toString())
 			tc.Reset(randomTCTime())
 		case <-n.ctx.Done():
 			break Loop
@@ -149,25 +179,57 @@ func (n *RaftNode) requestVoteFromOtherNodes() {
 	}
 
 	if votes > len(n.addresses)/2 {
-		n.role = Leader
+		n.updateRole(Leader)
+		leaderNode, _ := n.db.GetLeaderNode()
+		if leaderNode == nil {
+			if err := n.db.CreateLeaderNode(&LeaderNode{
+				Address:     n.address,
+				LeaderRound: 1,
+			}); err != nil {
+				log.Errorf("create leader node failed, %v", err)
+			}
+		} else {
+			if err := n.db.UpdateLeaderNode(&LeaderNode{
+				Address:     n.address,
+				LeaderRound: leaderNode.LeaderRound + 1,
+			}); err != nil {
+				log.Errorf("increase all leader round failed, %v", err)
+			}
+		}
 	} else {
-		n.role = Follower
+		n.updateRole(Follower)
 		n.voted.Store(false)
 	}
 }
 
 func (n *RaftNode) heartbeatRound() {
-	var hbs []Heartbeat
+	leaderNodeInfo, err := n.db.GetLeaderNode()
+	if err != nil {
+		log.Errorf("get leader node %s info failed, %v", n.address, err)
+		return
+	}
+
+	if leaderNodeInfo.Address != n.address {
+		log.Error("leaderNodeInfo.Address != n.address")
+		return
+	}
+
+	var hbs []HeartbeatRsp
 	for _, client := range n.clients {
-		resp, err := client.R().Get("/heartbeat")
+		resp, err := client.R().
+			SetBody(&HeartbeatReq{
+				LeaderAddress: leaderNodeInfo.Address,
+				LeaderRound:   leaderNodeInfo.LeaderRound,
+			}).
+			Post("/heartbeat")
 		if err != nil {
 			log.Errorf("get /heartbeat failed, %v", err)
 			continue
 		}
 
-		hb := &Heartbeat{}
+		hb := &HeartbeatRsp{}
 		if err = json.Unmarshal(resp.Body(), hb); err != nil {
-			log.Errorf("convert resp body to Heartbeat failed, %v", err)
+			log.Errorf("convert resp body to HeartbeatRsp failed, %v", err)
 			continue
 		}
 		hbs = append(hbs, *hb)
@@ -177,12 +239,15 @@ func (n *RaftNode) heartbeatRound() {
 	log.Info("heartbeat round complete")
 }
 
-func (n *RaftNode) formatHBs(hbs []Heartbeat) string {
+func (n *RaftNode) formatHBs(hbs []HeartbeatRsp) string {
 
 	hbsStr := ""
 	for i, hb := range hbs {
 		hbsStr += "Address: " + hb.Address + ", "
 		hbsStr += "Time: " + hb.Time.In(n.cst).Format(time.RFC3339)
+		if hb.ErrMsg != "" {
+			hbsStr += ", ErrMsg: " + hb.ErrMsg
+		}
 		if i != len(hbs)-1 {
 			hbsStr += "; "
 		}
@@ -220,6 +285,14 @@ type Notify struct {
 	listeners map[string]func(map[string]string)
 }
 
+func (n *RaftNode) updateRole(role Role) {
+	n.role = role
+	if err := n.db.UpdateNodeRole(n.address, role); err != nil {
+		log.Errorf("update node %s to role %s failed, %v", n.address, role.toString(), err)
+	}
+}
+
+// NewNotify future to decouple need
 func NewNotify() *Notify {
 	n := &Notify{
 		listeners: make(map[string]func(map[string]string)),
@@ -240,6 +313,6 @@ func (n *RaftNode) changeRole(m map[string]string) {
 	log.Debugf("change role from %s to %s", n.role.toString(), m["role"])
 
 	n.roleMu.Lock()
-	n.role = Roles()[m["role"]]
+	n.updateRole(Roles()[m["role"]])
 	n.roleMu.Unlock()
 }
